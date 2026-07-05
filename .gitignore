@@ -3,11 +3,13 @@
 /local.properties
 /.idea/
 .DS_Store
-/build/
-/app/build/
+# Build outputs of every module (app/, desktop/, root)
+build/
 /captures/
 .externalNativeBuild/
 .cxx/
+.kotlin/
 *.apk
 *.keystore
+*.jks
 .env

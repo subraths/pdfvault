@@ -41,7 +41,22 @@ jobs:
 
       - name: Decode release keystore
         if: env.HAS_KEYSTORE == 'true'
-        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.jks"
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          # Fail fast (and clearly) if the secret didn't decode to a usable keystore —
+          # otherwise packageRelease dies minutes later with an opaque DER parse error.
+          if ! keytool -list -keystore "$RUNNER_TEMP/release.jks" \
+              -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null 2>&1; then
+            echo "::error::KEYSTORE_BASE64 did not decode to a valid keystore (or the password/alias is wrong)."
+            echo "::error::Recreate it with:  base64 -w0 upload.jks | gh secret set KEYSTORE_BASE64"
+            keytool -list -keystore "$RUNNER_TEMP/release.jks" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" 2>&1 | tail -3
+            exit 1
+          fi
+          echo "Keystore OK: alias '$KEY_ALIAS' found."
 
       - name: Build release APK
         env:
