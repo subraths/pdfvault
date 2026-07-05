@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- PDFs are copied here (under the real filename) before Share / Open-with. -->
+    <cache-path name="shared_pdfs" path="share/" />
+</paths>

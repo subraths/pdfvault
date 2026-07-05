@@ -1,0 +1,63 @@
+service: pdfvault-backend
+
+frameworkVersion: "3"
+
+plugins:
+  - serverless-esbuild
+  - serverless-offline
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  region: ${opt:region, "ap-south-1"}
+  stage: ${opt:stage, "dev"}
+  memorySize: 256
+  timeout: 15
+  httpApi:
+    cors: true
+  environment:
+    MONGODB_URI: ${env:MONGODB_URI}
+    MONGODB_DB: ${env:MONGODB_DB, "pdfvault"}
+    JWT_SECRET: ${env:JWT_SECRET}
+    JWT_TTL_SECONDS: ${env:JWT_TTL_SECONDS, "2592000"} # 30 days
+    ENCRYPTION_KEY: ${env:ENCRYPTION_KEY} # base64 of 32 random bytes
+
+custom:
+  esbuild:
+    bundle: true
+    minify: false
+    sourcemap: true
+    target: node20
+    platform: node
+    # The Mongo driver pulls in optional native/BSON deps it can resolve at runtime.
+    external:
+      - mongodb-client-encryption
+      - "@mongodb-js/zstd"
+      - kerberos
+      - snappy
+      - aws4
+
+functions:
+  auth:
+    handler: src/handlers/auth.handler
+    events:
+      - httpApi: { path: /auth/register, method: post }
+      - httpApi: { path: /auth/login, method: post }
+      - httpApi: { path: /me, method: get }
+
+  accounts:
+    handler: src/handlers/accounts.handler
+    events:
+      - httpApi: { path: /accounts, method: get }
+      - httpApi: { path: /accounts, method: post }
+      - httpApi: { path: /accounts/{id}, method: patch }
+      - httpApi: { path: /accounts/{id}, method: delete }
+
+  recents:
+    handler: src/handlers/recents.handler
+    events:
+      - httpApi: { path: /recents, method: get }
+      - httpApi: { path: /recents, method: put }
+      - httpApi: { path: /recents/sync, method: post }
+      # docId (an S3 key) can contain "/", so it goes in the query string, not the path.
+      - httpApi: { path: /recents, method: delete }

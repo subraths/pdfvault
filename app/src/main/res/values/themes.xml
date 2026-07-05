@@ -1,0 +1,9 @@
+<resources>
+    <!-- Base application theme. Colors are driven by Compose Material3 at runtime;
+         this XML theme only needs to provide a sensible window background + no action bar. -->
+    <style name="Theme.PdfVault" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/ic_launcher_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

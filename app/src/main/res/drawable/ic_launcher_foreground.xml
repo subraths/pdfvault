@@ -1,0 +1,18 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Document body -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M38,30 h22 l12,12 v36 a0,0 0 0 1 0,0 h-34 a0,0 0 0 1 0,0 v-48 a0,0 0 0 1 0,0 z" />
+    <!-- Folded corner -->
+    <path
+        android:fillColor="#BBDEFB"
+        android:pathData="M60,30 l12,12 h-12 z" />
+    <!-- PDF label bar -->
+    <path
+        android:fillColor="#E53935"
+        android:pathData="M40,58 h28 v12 h-28 z" />
+</vector>

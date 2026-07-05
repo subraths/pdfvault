@@ -1,0 +1,77 @@
+name: Backend Deploy
+
+# Deploys the AWS Lambda + API Gateway backend with the Serverless Framework.
+# Runs on pushes to main that touch backend/, or on manual dispatch (pick the stage/region).
+# Gate: a full end-to-end smoke test runs first against a throwaway MongoDB (dropped after) —
+# if it fails, nothing is deployed.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-deploy.yml"
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "Serverless stage"
+        default: "prod"
+        required: true
+      region:
+        description: "AWS region"
+        default: "us-east-1"
+        required: true
+
+concurrency:
+  # Never run two deploys of the same ref at once; queue them instead of cancelling.
+  group: backend-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Smoke test + serverless deploy
+    runs-on: ubuntu-latest
+    # Optional: create a "production" environment in repo settings to require manual approval
+    # and/or scope these secrets. Referencing it here is harmless if it doesn't exist yet.
+    environment: production
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      MONGODB_URI: ${{ secrets.MONGODB_URI }}
+      MONGODB_DB: ${{ secrets.MONGODB_DB || 'pdfvault' }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      JWT_TTL_SECONDS: ${{ secrets.JWT_TTL_SECONDS || '2592000' }}
+      ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+      STAGE: ${{ github.event.inputs.stage || 'prod' }}
+      AWS_REGION: ${{ github.event.inputs.region || 'us-east-1' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build (tsc) for smoke test
+        run: npm run build
+
+      - name: Smoke test (throwaway DB "pdfvault_smoketest", dropped afterwards)
+        run: node scripts/smoke.mjs
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Serverless deploy
+        run: npx serverless deploy --stage "$STAGE" --region "$AWS_REGION" --verbose
+
+      - name: Show deployed endpoint
+        run: npx serverless info --stage "$STAGE" --region "$AWS_REGION" | tee "$GITHUB_STEP_SUMMARY"

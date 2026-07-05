@@ -1,0 +1,30 @@
+{
+  "name": "pdfvault-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AWS Lambda + MongoDB backend for PdfVault: user accounts, multi-account S3 profiles, and cross-device recents sync.",
+  "type": "commonjs",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "deploy": "serverless deploy",
+    "deploy:dev": "serverless deploy --stage dev",
+    "offline": "serverless offline"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "mongodb": "^6.8.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.145",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/node": "^20.14.0",
+    "esbuild": "^0.23.0",
+    "serverless": "^3.39.0",
+    "serverless-esbuild": "^1.52.1",
+    "serverless-offline": "^13.6.0",
+    "typescript": "^5.5.4"
+  }
+}

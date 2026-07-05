@@ -1,0 +1,72 @@
+name: CI
+
+# Continuous integration: validate every push to main and every pull request.
+# No secrets are required — this only typechecks / compiles / packages, never deploys.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend · typecheck + package
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Package (validates esbuild bundle + serverless.yml, no AWS creds)
+        run: npx serverless package --stage ci
+        env:
+          # serverless resolves ${env:...} at package time; these are throwaway placeholders,
+          # never used at runtime. The real values are injected only in backend-deploy.yml.
+          MONGODB_URI: mongodb+srv://ci:ci@example.invalid/ci
+          JWT_SECRET: ci-placeholder-not-a-real-secret
+          ENCRYPTION_KEY: Y2ktcGxhY2Vob2xkZXIta2V5LTMyLWJ5dGVzLWFhYWE=
+
+  android:
+    name: Android · assembleDebug
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Assemble debug APK
+        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+  desktop:
+    name: Desktop · compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Compile desktop module
+        run: ./gradlew :desktop:compileKotlin --no-daemon --stacktrace
