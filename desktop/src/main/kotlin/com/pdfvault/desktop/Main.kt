@@ -4,9 +4,9 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationRail
@@ -27,11 +27,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyShortcut
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.FrameWindowScope
-import androidx.compose.ui.window.MenuBar
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.WindowPosition
@@ -50,6 +52,7 @@ import com.pdfvault.desktop.ui.OpenTarget
 import com.pdfvault.desktop.ui.ReaderController
 import com.pdfvault.desktop.ui.ReaderScreen
 import com.pdfvault.desktop.ui.RecentsScreen
+import com.pdfvault.desktop.ui.SettingsScreen
 import com.pdfvault.desktop.ui.SetupScreen
 import com.pdfvault.desktop.ui.openTargetFromKey
 import kotlinx.coroutines.launch
@@ -60,7 +63,12 @@ import java.awt.dnd.DropTargetAdapter
 import java.awt.dnd.DropTargetDropEvent
 import java.io.File
 
-private enum class Tab { RECENTS, FILES }
+private enum class Tab { RECENTS, FILES, SETTINGS }
+
+/** App-level actions reachable from window-level keyboard shortcuts. */
+private class AppActions {
+    var openLocal: () -> Unit = {}
+}
 
 fun main(args: Array<String>) = application {
     // Open a PDF passed on the command line (file association / "open with").
@@ -73,24 +81,37 @@ fun main(args: Array<String>) = application {
         size = DpSize(bounds.width.dp, bounds.height.dp),
     )
 
+    val appActions = remember { AppActions() }
+
+    fun saveBoundsAndQuit() {
+        val size = windowState.size
+        val pos = windowState.position as? WindowPosition.Absolute
+        UiPreferences.setWindowBounds(
+            x = pos?.x?.value?.toInt() ?: -1,
+            y = pos?.y?.value?.toInt() ?: -1,
+            width = size.width.value.toInt(),
+            height = size.height.value.toInt(),
+        )
+        exitApplication()
+    }
+
     Window(
-        onCloseRequest = {
-            val size = windowState.size
-            val pos = windowState.position as? WindowPosition.Absolute
-            UiPreferences.setWindowBounds(
-                x = pos?.x?.value?.toInt() ?: -1,
-                y = pos?.y?.value?.toInt() ?: -1,
-                width = size.width.value.toInt(),
-                height = size.height.value.toInt(),
-            )
-            exitApplication()
-        },
+        onCloseRequest = ::saveBoundsAndQuit,
         title = "PdfVault",
         state = windowState,
+        // App-level shortcuts (the reader handles its own keys when focused).
+        onPreviewKeyEvent = { ev ->
+            when {
+                ev.type != KeyEventType.KeyDown -> false
+                ev.isCtrlPressed && ev.key == Key.O -> { appActions.openLocal(); true }
+                ev.isCtrlPressed && ev.key == Key.Q -> { saveBoundsAndQuit(); true }
+                else -> false
+            }
+        },
     ) {
         App(
             initialLocal = initialLocal,
-            onQuit = ::exitApplication,
+            appActions = appActions,
             onToggleFullscreen = {
                 windowState.placement =
                     if (windowState.placement == WindowPlacement.Fullscreen) WindowPlacement.Floating
@@ -101,7 +122,7 @@ fun main(args: Array<String>) = application {
 }
 
 @Composable
-private fun FrameWindowScope.App(initialLocal: File?, onQuit: () -> Unit, onToggleFullscreen: () -> Unit) {
+private fun FrameWindowScope.App(initialLocal: File?, appActions: AppActions, onToggleFullscreen: () -> Unit) {
     val credentials = remember { CredentialStore() }
     var repository by remember { mutableStateOf(credentials.load()?.let { S3Repository(it) }) }
     var opened by remember { mutableStateOf<OpenTarget?>(initialLocal?.let { OpenTarget.Local(it) }) }
@@ -149,14 +170,8 @@ private fun FrameWindowScope.App(initialLocal: File?, onQuit: () -> Unit, onTogg
     fun setTheme(mode: ThemeMode) { UiPreferences.themeMode = mode; themeMode = mode }
     fun openLocal() { FileChoosers.openSinglePdf()?.let { opened = OpenTarget.Local(it) } }
 
-    AppMenuBar(
-        controller = controller,
-        themeMode = themeMode,
-        onOpenLocal = { openLocal() },
-        onSetTheme = { setTheme(it) },
-        onCloud = { showCloud = true },
-        onQuit = onQuit,
-    )
+    // Expose app-level actions to the window's keyboard shortcuts (Ctrl+O).
+    SideEffect { appActions.openLocal = { openLocal() } }
 
     val dark = when (themeMode) {
         ThemeMode.DARK -> true
@@ -201,19 +216,10 @@ private fun FrameWindowScope.App(initialLocal: File?, onQuit: () -> Unit, onTogg
                             label = { Text("Files") },
                         )
                         NavigationRailItem(
-                            selected = false,
-                            onClick = {
-                                // Full sign-out: cloud session + local S3 config. The account (and
-                                // its S3 keys, encrypted) stays in the cloud — signing back in with
-                                // email + password restores everything.
-                                SyncManager.signOut()
-                                credentials.clear()
-                                repo.close()
-                                repository = null
-                                showCloud = true
-                            },
-                            icon = { Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "Sign out") },
-                            label = { Text("Sign out") },
+                            selected = tab == Tab.SETTINGS,
+                            onClick = { tab = Tab.SETTINGS },
+                            icon = { Icon(Icons.Filled.Settings, contentDescription = "Settings") },
+                            label = { Text("Settings") },
                         )
                     }
                     when (tab) {
@@ -222,6 +228,23 @@ private fun FrameWindowScope.App(initialLocal: File?, onQuit: () -> Unit, onTogg
                             repository = repo,
                             onOpenPdf = { key -> opened = OpenTarget.Remote(key) },
                             onSignOut = {
+                                SyncManager.signOut()
+                                credentials.clear()
+                                repo.close()
+                                repository = null
+                                showCloud = true
+                            },
+                        )
+                        Tab.SETTINGS -> SettingsScreen(
+                            themeMode = themeMode,
+                            accountLabel = credentials.load()?.let { "${it.bucket}  ·  ${it.region}" },
+                            onSetTheme = { setTheme(it) },
+                            onOpenLocal = { openLocal() },
+                            onCloud = { showCloud = true },
+                            onSignOut = {
+                                // Full sign-out: cloud session + local S3 config. The account (and
+                                // its S3 keys, encrypted) stays in the cloud — signing back in with
+                                // email + password restores everything.
                                 SyncManager.signOut()
                                 credentials.clear()
                                 repo.close()
@@ -243,55 +266,3 @@ private fun FrameWindowScope.App(initialLocal: File?, onQuit: () -> Unit, onTogg
     }
 }
 
-@Composable
-private fun FrameWindowScope.AppMenuBar(
-    controller: ReaderController,
-    themeMode: ThemeMode,
-    onOpenLocal: () -> Unit,
-    onSetTheme: (ThemeMode) -> Unit,
-    onCloud: () -> Unit,
-    onQuit: () -> Unit,
-) {
-    val has = controller.hasDocument
-    MenuBar {
-        Menu("File", mnemonic = 'F') {
-            Item("Open…", onClick = onOpenLocal, shortcut = KeyShortcut(Key.O, ctrl = true))
-            Item("Print…", enabled = has, onClick = { controller.onPrint() }, shortcut = KeyShortcut(Key.P, ctrl = true))
-            Separator()
-            Item("Open in Default Viewer", enabled = has, onClick = { controller.onOpenExternal() })
-            Item("Reveal in File Manager", enabled = has, onClick = { controller.onReveal() })
-            Separator()
-            Item("Quit", onClick = onQuit, shortcut = KeyShortcut(Key.Q, ctrl = true))
-        }
-        Menu("View", mnemonic = 'V') {
-            Item("Zoom In", enabled = has, onClick = { controller.onZoomIn() }, shortcut = KeyShortcut(Key.Equals, ctrl = true))
-            Item("Zoom Out", enabled = has, onClick = { controller.onZoomOut() }, shortcut = KeyShortcut(Key.Minus, ctrl = true))
-            Item("Reset Zoom", enabled = has, onClick = { controller.onZoomReset() }, shortcut = KeyShortcut(Key.Zero, ctrl = true))
-            Separator()
-            Item("Fit Width", enabled = has, onClick = { controller.onFitWidth() })
-            Item("Rotate Right", enabled = has, onClick = { controller.onRotate() }, shortcut = KeyShortcut(Key.R, ctrl = true))
-            Separator()
-            Item("Page Thumbnails", enabled = has, onClick = { controller.onToggleThumbnails() })
-            Item("Fullscreen", enabled = has, onClick = { controller.onToggleFullscreen() }, shortcut = KeyShortcut(Key.F11))
-            Separator()
-            Menu("Theme") {
-                RadioButtonItem("System", selected = themeMode == ThemeMode.SYSTEM, onClick = { onSetTheme(ThemeMode.SYSTEM) })
-                RadioButtonItem("Light", selected = themeMode == ThemeMode.LIGHT, onClick = { onSetTheme(ThemeMode.LIGHT) })
-                RadioButtonItem("Dark", selected = themeMode == ThemeMode.DARK, onClick = { onSetTheme(ThemeMode.DARK) })
-            }
-        }
-        Menu("Go", mnemonic = 'G') {
-            Item("Next Page", enabled = has, onClick = { controller.onNextPage() })
-            Item("Previous Page", enabled = has, onClick = { controller.onPrevPage() })
-            Item("First Page", enabled = has, onClick = { controller.onFirstPage() }, shortcut = KeyShortcut(Key.MoveHome, ctrl = true))
-            Item("Last Page", enabled = has, onClick = { controller.onLastPage() }, shortcut = KeyShortcut(Key.MoveEnd, ctrl = true))
-            Item("Go to Page…", enabled = has, onClick = { controller.onGoToPage() }, shortcut = KeyShortcut(Key.G, ctrl = true))
-            Separator()
-            Item("Find", enabled = has, onClick = { controller.onFind() }, shortcut = KeyShortcut(Key.F, ctrl = true))
-            Item("Toggle Bookmark", enabled = has, onClick = { controller.onBookmark() }, shortcut = KeyShortcut(Key.B, ctrl = true))
-        }
-        Menu("Cloud", mnemonic = 'C') {
-            Item("Sign in / Sync…", onClick = onCloud)
-        }
-    }
-}

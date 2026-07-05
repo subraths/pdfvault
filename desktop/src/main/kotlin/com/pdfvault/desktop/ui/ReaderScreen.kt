@@ -37,6 +37,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Bookmarks
@@ -84,6 +85,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.isCtrlPressed as keyIsCtrlPressed
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isCtrlPressed
@@ -305,18 +307,30 @@ fun ReaderScreen(
             .fillMaxSize()
             .focusRequester(rootFocus)
             .focusable()
-            // Raw navigation keys (arrows/space/pageup-down/home/end/esc); Ctrl-shortcuts are on
-            // the menu bar. onKeyEvent bubbles, so a focused text field (search) handles keys first.
+            // All reader keys live here (the window menu bar is gone). onKeyEvent bubbles, so a
+            // focused text field (search) handles keys first.
             .onKeyEvent { ev ->
                 if (ev.type != KeyEventType.KeyDown) return@onKeyEvent false
-                when (ev.key) {
-                    Key.DirectionDown -> { scope.launch { listState.animateScrollBy(stepPx) }; true }
-                    Key.DirectionUp -> { scope.launch { listState.animateScrollBy(-stepPx) }; true }
-                    Key.Spacebar, Key.PageDown -> { goToPage(currentPage + 1); true }
-                    Key.PageUp -> { goToPage(currentPage - 1); true }
-                    Key.MoveHome -> { goToPage(0); true }
-                    Key.MoveEnd -> { goToPage(pageCount - 1); true }
-                    Key.Escape -> {
+                val ctrl = ev.keyIsCtrlPressed
+                when {
+                    ctrl && ev.key == Key.Equals -> { zoom = (zoom + 0.25f).coerceAtMost(MAX_ZOOM); true }
+                    ctrl && ev.key == Key.Minus -> { zoom = (zoom - 0.25f).coerceAtLeast(MIN_ZOOM); true }
+                    ctrl && ev.key == Key.Zero -> { zoom = 1f; true }
+                    ctrl && ev.key == Key.R -> { rotation = (rotation + 90) % 360; true }
+                    ctrl && ev.key == Key.G -> { showJump = true; true }
+                    ctrl && ev.key == Key.F -> { panel = SidePanel.SEARCH; true }
+                    ctrl && ev.key == Key.B -> { toggleBookmark(currentPage); true }
+                    ctrl && ev.key == Key.P -> { controller.onPrint(); true }
+                    ctrl && ev.key == Key.MoveHome -> { goToPage(0); true }
+                    ctrl && ev.key == Key.MoveEnd -> { goToPage(pageCount - 1); true }
+                    ev.key == Key.F11 -> { controller.onToggleFullscreen(); true }
+                    ev.key == Key.DirectionDown -> { scope.launch { listState.animateScrollBy(stepPx) }; true }
+                    ev.key == Key.DirectionUp -> { scope.launch { listState.animateScrollBy(-stepPx) }; true }
+                    ev.key == Key.Spacebar || ev.key == Key.PageDown -> { goToPage(currentPage + 1); true }
+                    ev.key == Key.PageUp -> { goToPage(currentPage - 1); true }
+                    ev.key == Key.MoveHome -> { goToPage(0); true }
+                    ev.key == Key.MoveEnd -> { goToPage(pageCount - 1); true }
+                    ev.key == Key.Escape -> {
                         if (panel != SidePanel.NONE) { panel = SidePanel.NONE; true } else { onBack(); true }
                     }
                     else -> false
@@ -397,6 +411,43 @@ fun ReaderScreen(
                     }
                     IconButton(onClick = { zoom = (zoom + 0.25f).coerceAtMost(MAX_ZOOM) }) {
                         Icon(Icons.Filled.Add, contentDescription = "Zoom in")
+                    }
+                    // Actions that used to live on the window menu bar.
+                    Box {
+                        var showMore by remember { mutableStateOf(false) }
+                        IconButton(onClick = { showMore = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "More")
+                        }
+                        DropdownMenu(expanded = showMore, onDismissRequest = { showMore = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Page thumbnails") },
+                                onClick = {
+                                    showMore = false
+                                    panel = if (panel == SidePanel.THUMBNAILS) SidePanel.NONE else SidePanel.THUMBNAILS
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Rotate right    Ctrl+R") },
+                                onClick = { showMore = false; rotation = (rotation + 90) % 360 },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Fullscreen    F11") },
+                                onClick = { showMore = false; controller.onToggleFullscreen() },
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("Print…    Ctrl+P") },
+                                onClick = { showMore = false; controller.onPrint() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Open in default viewer") },
+                                onClick = { showMore = false; controller.onOpenExternal() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Reveal in file manager") },
+                                onClick = { showMore = false; controller.onReveal() },
+                            )
+                        }
                     }
                 }
             },
