@@ -15,11 +15,23 @@ concurrency:
 
 jobs:
   backend:
-    name: Backend · typecheck + package
+    name: Backend · typecheck + smoke + package
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: backend
+    # Ephemeral MongoDB so the end-to-end smoke test runs on every PR with no secrets and without
+    # touching Atlas. (The deploy workflow's smoke test hits real Atlas; this one doesn't need to.)
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -30,6 +42,14 @@ jobs:
       - run: npm ci
       - name: Typecheck
         run: npm run typecheck
+      - name: Build (tsc) for smoke test
+        run: npm run build
+      - name: Smoke test (ephemeral MongoDB, 18 end-to-end assertions)
+        run: node scripts/smoke.mjs
+        env:
+          MONGODB_URI: mongodb://localhost:27017
+          JWT_SECRET: ci-placeholder-not-a-real-secret
+          ENCRYPTION_KEY: Y2ktcGxhY2Vob2xkZXIta2V5LTMyLWJ5dGVzLWFhYWE=
       - name: Package (validates esbuild bundle + serverless.yml, no AWS creds)
         run: npx serverless package --stage ci
         env:

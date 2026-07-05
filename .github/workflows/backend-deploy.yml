@@ -2,8 +2,9 @@ name: Backend Deploy
 
 # Deploys the AWS Lambda + API Gateway backend with the Serverless Framework.
 # Runs on pushes to main that touch backend/, or on manual dispatch (pick the stage/region).
-# Gate: a full end-to-end smoke test runs first against a throwaway MongoDB (dropped after) —
-# if it fails, nothing is deployed.
+# Gate: typecheck + a full end-to-end smoke test against Atlas (throwaway DB, dropped after) run
+# first; if the smoke test fails, nothing is deployed. Requires Atlas Network Access to allow the
+# runner (0.0.0.0/0 or the runner's IP).
 
 on:
   push:
@@ -60,7 +61,10 @@ jobs:
       - name: Build (tsc) for smoke test
         run: npm run build
 
-      - name: Smoke test (throwaway DB "pdfvault_smoketest", dropped afterwards)
+      - name: Smoke test against Atlas (throwaway DB "pdfvault_smoketest", dropped afterwards)
+        # Uses the job-level MONGODB_URI/JWT_SECRET/ENCRYPTION_KEY secrets. The script forces the DB
+        # name to pdfvault_smoketest and drops it after, so your real data is untouched. This also
+        # confirms the deployed Lambda's Atlas creds actually connect before we ship.
         run: node scripts/smoke.mjs
 
       - name: Configure AWS credentials

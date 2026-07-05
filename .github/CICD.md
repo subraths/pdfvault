@@ -5,7 +5,7 @@ Three GitHub Actions workflows live in [`.github/workflows/`](workflows/):
 | Workflow | File | Trigger | What it does |
 | --- | --- | --- | --- |
 | **CI** | `ci.yml` | every push to `main`, every PR | Backend typecheck + `serverless package`; Android `assembleDebug`; desktop `compileKotlin`. No secrets needed. |
-| **Backend Deploy** | `backend-deploy.yml` | push to `main` touching `backend/**`, or manual dispatch | Smoke-tests against a throwaway Mongo DB, then `serverless deploy`. |
+| **Backend Deploy** | `backend-deploy.yml` | push to `main` touching `backend/**`, or manual dispatch | Typecheck + smoke test against Atlas (throwaway DB), then `serverless deploy`. |
 | **Android Release** | `android-release.yml` | push a `v*` tag, or manual dispatch | Builds a release APK and attaches it to a **GitHub Release**. |
 
 > This repo isn't a git repo yet. To use these: `git init && git add . && git commit -m "…"`, create a
@@ -18,15 +18,26 @@ Three GitHub Actions workflows live in [`.github/workflows/`](workflows/):
 | Secret | Notes |
 | --- | --- |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | IAM user allowed to deploy (Lambda, API Gateway, CloudFormation, S3, IAM, logs). |
-| `MONGODB_URI` | Atlas connection string. **Allow-list GitHub runners** or use `0.0.0.0/0` on the Atlas project. |
+| `MONGODB_URI` | Atlas connection string, baked into the deployed Lambda's env. |
 | `JWT_SECRET` | Long random string. |
 | `ENCRYPTION_KEY` | `openssl rand -base64 32`. |
 | `MONGODB_DB` *(optional)* | Defaults to `pdfvault`. |
 | `JWT_TTL_SECONDS` *(optional)* | Defaults to `2592000` (30 days). |
 
-The smoke-test step also uses `MONGODB_URI`/`JWT_SECRET`/`ENCRYPTION_KEY`; it forces the DB name
-`pdfvault_smoketest` and drops it afterwards, so your real data is untouched. (If you'd rather CI
-never touch Atlas, delete the "Smoke test" step from `backend-deploy.yml`.)
+**Smoke tests run in two places:**
+- **CI (`ci.yml`, every PR):** the 18-assertion `scripts/smoke.mjs` runs against an ephemeral
+  `mongo:7` service container — no secrets, never touches Atlas, works on fork PRs.
+- **Deploy (`backend-deploy.yml`):** the same smoke test runs against **real Atlas** using your
+  secrets, then deploys only if it passes. It forces the DB name `pdfvault_smoketest` and drops it
+  afterwards, so your real data is untouched — and it doubles as a check that the deployed Lambda's
+  Atlas creds actually connect. (This is why the deploy runner needs Atlas Network Access; you've set
+  `0.0.0.0/0`.)
+
+> ⚠️ **Atlas Network Access for the deployed Lambda.** `serverless deploy` itself doesn't connect to
+> Mongo, but the *running* Lambda does. Public Lambdas egress from rotating AWS IPs, so add
+> `0.0.0.0/0` to your Atlas project's **Network Access** list (or set up VPC + NAT + PrivateLink for a
+> fixed IP). Without this the deploy succeeds but the API returns 500s at runtime — the same
+> `SSL alert number 80` you'd see for a blocked IP.
 
 Default stage is `prod`, region `ap-south-1` — override via the **Run workflow** dispatch inputs.
 Optionally create a `production` environment (Settings → Environments) to require a manual approval
