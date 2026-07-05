@@ -17,12 +17,40 @@ Three GitHub Actions workflows live in [`.github/workflows/`](workflows/):
 
 | Secret | Notes |
 | --- | --- |
-| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | IAM user allowed to deploy (Lambda, API Gateway, CloudFormation, S3, IAM, logs). |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | IAM user allowed to deploy — see **IAM permissions** below. |
 | `MONGODB_URI` | Atlas connection string, baked into the deployed Lambda's env. |
 | `JWT_SECRET` | Long random string. |
 | `ENCRYPTION_KEY` | `openssl rand -base64 32`. |
 | `MONGODB_DB` *(optional)* | Defaults to `pdfvault`. |
 | `JWT_TTL_SECONDS` *(optional)* | Defaults to `2592000` (30 days). |
+
+#### IAM permissions for the deploy user
+
+`serverless deploy` provisions via **CloudFormation** and needs to manage S3 (deployment bucket),
+Lambda, IAM (the function's execution role), CloudWatch Logs, and API Gateway. A bare user gets
+`not authorized to perform: cloudformation:CreateChangeSet` (and would then hit several more).
+
+**Least-privilege (recommended):** attach [`backend/aws/deploy-policy.json`](../backend/aws/deploy-policy.json)
+— it's scoped to `pdfvault-backend-*` resources. Apply it to your deploy user (`--user-name` is your
+IAM user, e.g. `pdfvauld-lambda-backend`):
+
+```sh
+aws iam put-user-policy \
+  --user-name pdfvauld-lambda-backend \
+  --policy-name pdfvault-serverless-deploy \
+  --policy-document file://backend/aws/deploy-policy.json
+```
+
+If a later deploy still reports one missing action, add that exact action to the JSON and re-apply
+(CloudFormation surfaces them one stack-event at a time).
+
+**Quick unblock (broad):** if you just want it deploying now, attach the AWS-managed
+`AdministratorAccess` policy to the user instead, and tighten later:
+
+```sh
+aws iam attach-user-policy --user-name pdfvauld-lambda-backend \
+  --policy-arn arn:aws:iam::aws:policy/AdministratorAccess
+```
 
 **Smoke tests run in two places:**
 - **CI (`ci.yml`, every PR):** the 18-assertion `scripts/smoke.mjs` runs against an ephemeral
