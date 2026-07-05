@@ -28,7 +28,7 @@ The smoke-test step also uses `MONGODB_URI`/`JWT_SECRET`/`ENCRYPTION_KEY`; it fo
 `pdfvault_smoketest` and drops it afterwards, so your real data is untouched. (If you'd rather CI
 never touch Atlas, delete the "Smoke test" step from `backend-deploy.yml`.)
 
-Default stage is `prod`, region `us-east-1` — override via the **Run workflow** dispatch inputs.
+Default stage is `prod`, region `ap-south-1` — override via the **Run workflow** dispatch inputs.
 Optionally create a `production` environment (Settings → Environments) to require a manual approval
 before each deploy.
 

@@ -8,7 +8,7 @@ plugins:
 
 provider:
   name: aws
-  runtime: nodejs20.x
+  runtime: nodejs24.x
   region: ${opt:region, "ap-south-1"}
   stage: ${opt:stage, "dev"}
   memorySize: 256
@@ -27,7 +27,7 @@ custom:
     bundle: true
     minify: false
     sourcemap: true
-    target: node20
+    target: node24
     platform: node
     # The Mongo driver pulls in optional native/BSON deps it can resolve at runtime.
     external:
@@ -50,8 +50,8 @@ functions:
     events:
       - httpApi: { path: /accounts, method: get }
       - httpApi: { path: /accounts, method: post }
-      - httpApi: { path: /accounts/{id}, method: patch }
-      - httpApi: { path: /accounts/{id}, method: delete }
+      - httpApi: { path: "/accounts/{id}", method: patch }
+      - httpApi: { path: "/accounts/{id}", method: delete }
 
   recents:
     handler: src/handlers/recents.handler

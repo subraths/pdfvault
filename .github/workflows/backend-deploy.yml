@@ -19,7 +19,7 @@ on:
         required: true
       region:
         description: "AWS region"
-        default: "us-east-1"
+        default: "ap-south-1"
         required: true
 
 concurrency:
@@ -44,12 +44,12 @@ jobs:
       JWT_TTL_SECONDS: ${{ secrets.JWT_TTL_SECONDS || '2592000' }}
       ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
       STAGE: ${{ github.event.inputs.stage || 'prod' }}
-      AWS_REGION: ${{ github.event.inputs.region || 'us-east-1' }}
+      AWS_REGION: ${{ github.event.inputs.region || 'ap-south-1' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
