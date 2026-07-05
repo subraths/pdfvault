@@ -112,3 +112,12 @@ from the **Actions** tab (**Android Release → Run workflow**) and type the tag
 
 **Actions → Backend Deploy → Run workflow**, choose the stage (`prod`/`dev`) and region. Or just
 push a `backend/**` change to `main`.
+
+## Troubleshooting the deploy
+
+| Error | Cause & fix |
+| --- | --- |
+| `not authorized to perform: cloudformation:CreateChangeSet` (or any `service:Action`) | The deploy user is missing a permission — see **IAM permissions** above; add the named action to `backend/aws/deploy-policy.json` and re-apply, or use `AdministratorAccess`. |
+| `Deployment bucket has been removed manually` | A previous failed deploy left a half-created stack (usually stuck in `REVIEW_IN_PROGRESS`) whose S3 bucket doesn't exist. Delete the stub stack, then redeploy: `aws cloudformation delete-stack --stack-name pdfvault-backend-<stage> --region <region>` (or delete it in the CloudFormation console). |
+| `provider.runtime must be equal to one of...` | **Cosmetic only** — Serverless Framework v3's schema predates `nodejs24.x`. Non-blocking; the deploy proceeds. |
+| App returns 500s after a successful deploy | The Lambda can't reach Atlas — add `0.0.0.0/0` to Atlas **Network Access** (see the ⚠️ note above). |
