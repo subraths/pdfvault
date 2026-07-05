@@ -31,42 +31,45 @@ data class PdfLink(
  */
 suspend fun loadPageLinks(file: File): Map<Int, List<PdfLink>> = withContext(Dispatchers.IO) {
     runCatching {
-        PDDocument.load(file).use { doc ->
-            val out = HashMap<Int, List<PdfLink>>()
-            doc.pages.forEachIndexed { pageIndex, page ->
-                val box = page.cropBox
-                val originX = box.lowerLeftX
-                val originY = box.lowerLeftY
-                val width = box.width.takeIf { it > 0f } ?: 1f
-                val height = box.height.takeIf { it > 0f } ?: 1f
-
-                val links = ArrayList<PdfLink>()
-                val annotations = runCatching { page.annotations }.getOrNull().orEmpty()
-                for (annotation in annotations) {
-                    if (annotation !is PDAnnotationLink) continue
-                    val rect = annotation.rectangle ?: continue
-                    val target = runCatching { resolveTarget(doc, annotation) }.getOrNull() ?: continue
-
-                    // PDF user space has a bottom-left origin; flip Y to our top-left space.
-                    val left = ((rect.lowerLeftX - originX) / width)
-                    val right = ((rect.upperRightX - originX) / width)
-                    val top = ((originY + height - rect.upperRightY) / height)
-                    val bottom = ((originY + height - rect.lowerLeftY) / height)
-                    links += PdfLink(
-                        rect = HighlightRect(
-                            left = minOf(left, right).coerceIn(0f, 1f),
-                            top = minOf(top, bottom).coerceIn(0f, 1f),
-                            right = maxOf(left, right).coerceIn(0f, 1f),
-                            bottom = maxOf(top, bottom).coerceIn(0f, 1f),
-                        ),
-                        target = target,
-                    )
-                }
-                if (links.isNotEmpty()) out[pageIndex] = links
-            }
-            out as Map<Int, List<PdfLink>>
-        }
+        PDDocument.load(file).use { doc -> extractLinks(doc) }
     }.getOrDefault(emptyMap())
+}
+
+/** Link extraction against an already-open [doc], so one parse can serve several readers. */
+internal fun extractLinks(doc: PDDocument): Map<Int, List<PdfLink>> {
+    val out = HashMap<Int, List<PdfLink>>()
+    doc.pages.forEachIndexed { pageIndex, page ->
+        val box = page.cropBox
+        val originX = box.lowerLeftX
+        val originY = box.lowerLeftY
+        val width = box.width.takeIf { it > 0f } ?: 1f
+        val height = box.height.takeIf { it > 0f } ?: 1f
+
+        val links = ArrayList<PdfLink>()
+        val annotations = runCatching { page.annotations }.getOrNull().orEmpty()
+        for (annotation in annotations) {
+            if (annotation !is PDAnnotationLink) continue
+            val rect = annotation.rectangle ?: continue
+            val target = runCatching { resolveTarget(doc, annotation) }.getOrNull() ?: continue
+
+            // PDF user space has a bottom-left origin; flip Y to our top-left space.
+            val left = ((rect.lowerLeftX - originX) / width)
+            val right = ((rect.upperRightX - originX) / width)
+            val top = ((originY + height - rect.upperRightY) / height)
+            val bottom = ((originY + height - rect.lowerLeftY) / height)
+            links += PdfLink(
+                rect = HighlightRect(
+                    left = minOf(left, right).coerceIn(0f, 1f),
+                    top = minOf(top, bottom).coerceIn(0f, 1f),
+                    right = maxOf(left, right).coerceIn(0f, 1f),
+                    bottom = maxOf(top, bottom).coerceIn(0f, 1f),
+                ),
+                target = target,
+            )
+        }
+        if (links.isNotEmpty()) out[pageIndex] = links
+    }
+    return out
 }
 
 /** Resolves a link's action or direct destination to an external URL or an in-document page. */

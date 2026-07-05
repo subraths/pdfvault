@@ -24,12 +24,15 @@ data class TocEntry(
  */
 suspend fun loadOutline(file: File): List<TocEntry> = withContext(Dispatchers.IO) {
     runCatching {
-        PDDocument.load(file).use { doc ->
-            val outline = doc.documentCatalog?.documentOutline ?: return@use emptyList()
-            val counter = intArrayOf(0)
-            convert(outline.children(), doc, counter)
-        }
+        PDDocument.load(file).use { doc -> extractOutline(doc) }
     }.getOrDefault(emptyList())
+}
+
+/** Outline extraction against an already-open [doc], so one parse can serve several readers. */
+internal fun extractOutline(doc: PDDocument): List<TocEntry> {
+    val outline = doc.documentCatalog?.documentOutline ?: return emptyList()
+    val counter = intArrayOf(0)
+    return convert(outline.children(), doc, counter)
 }
 
 private fun convert(items: Iterable<PDOutlineItem>, doc: PDDocument, counter: IntArray): List<TocEntry> {

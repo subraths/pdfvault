@@ -465,7 +465,7 @@ fun PdfViewerScreen(
                     if (continuousMode) {
                         ContinuousVerticalPdf(
                             document = s.document,
-                            docId = objectKey,
+                            docId = s.cacheId,
                             listState = listState,
                             colorFilter = pageColorFilter,
                             highlights = searchState.highlights,
@@ -482,7 +482,7 @@ fun PdfViewerScreen(
                     } else {
                         PdfPager(
                             document = s.document,
-                            docId = objectKey,
+                            docId = s.cacheId,
                             pagerState = pagerState,
                             direction = direction,
                             colorFilter = pageColorFilter,
@@ -846,12 +846,15 @@ private fun ContinuousVerticalPdf(
         }
 
         // Render a small forward-biased window of pages into the cache ahead of the viewport,
-        // so scrolling reveals already-rendered pages instead of spinners. collectLatest cancels
-        // stale prefetch work the moment the user scrolls somewhere new.
+        // so scrolling reveals already-rendered pages instead of spinners. Debounced so prefetch
+        // only runs when scrolling pauses — it shares one render mutex with the visible pages and
+        // must never queue ahead of them. collectLatest cancels stale work between pages.
         LaunchedEffect(document, docId, renderWidthPx) {
-            snapshotFlow { listState.firstVisibleItemIndex }.collectLatest { first ->
-                prefetchPages(document, docId, first, renderWidthPx, pageCount)
-            }
+            snapshotFlow { listState.firstVisibleItemIndex }
+                .debounce(150)
+                .collectLatest { first ->
+                    prefetchPages(document, docId, first, renderWidthPx, pageCount)
+                }
         }
 
         LazyColumn(

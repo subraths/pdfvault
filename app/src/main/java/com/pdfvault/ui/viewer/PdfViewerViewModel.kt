@@ -15,13 +15,13 @@ import com.pdfvault.pdf.PdfDocument
 import com.pdfvault.pdf.PdfLink
 import com.pdfvault.pdf.TocEntry
 import com.pdfvault.pdf.extractPageText
-import com.pdfvault.pdf.loadOutline
-import com.pdfvault.pdf.loadPageLinks
+import com.pdfvault.pdf.loadPdfExtras
 import com.pdfvault.pdf.searchPdfHighlights
 import com.pdfvault.ui.userMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -40,6 +40,11 @@ sealed interface PdfViewerState {
     data class Ready(
         val document: PdfDocument,
         val title: String,
+        /**
+         * Version-unique id for the bitmap cache (the cache file's name embeds the S3 ETag).
+         * Keying renders by objectKey alone served stale bitmaps after a file changed remotely.
+         */
+        val cacheId: String,
         val outline: List<TocEntry> = emptyList(),
         val outlineLoading: Boolean = true,
         /** Tappable link regions per page index (URLs and in-document jumps). */
@@ -231,58 +236,78 @@ class PdfViewerViewModel @Inject constructor(
             _state.value = PdfViewerState.Loading
             runCatching {
                 withContext(Dispatchers.IO) {
-                    // Fetch the current ETag; null means we're offline (fall back to any cached copy).
-                    val eTag = repository.objectETag(objectKey)
-                    val target = session.cacheFileFor(objectKey, eTag)
-                    val file = when {
-                        // A complete copy for this exact version already on disk.
-                        target.exists() && target.length() > 0L -> target
-                        // Online: (re)download the current version.
-                        eTag != null -> { downloadToCache(repository, objectKey, target); target }
-                        // Offline: use the newest cached version we have for this key, if any.
-                        else -> session.newestCachedFor(objectKey)
+                    // Fast path: any complete cached copy opens instantly — no network round-trip
+                    // before first render. Freshness is checked in the background afterwards.
+                    val cached = session.newestCachedFor(objectKey)?.takeIf { it.length() > 0L }
+                    val file = cached ?: run {
+                        // Nothing cached: fetch the current ETag (null means offline) and download.
+                        val eTag = repository.objectETag(objectKey)
                             ?: error("You're offline and this PDF hasn't been downloaded yet.")
+                        val target = session.cacheFileFor(objectKey, eTag)
+                        if (!target.exists() || target.length() == 0L) {
+                            downloadToCache(repository, objectKey, target)
+                        }
+                        target
                     }
                     // Touch for LRU, then evict old/other cached PDFs over the cap (keeping this one).
                     file.setLastModified(System.currentTimeMillis())
                     session.prunePdfCache(MAX_CACHE_BYTES, keep = file)
                     openedFile = file
-                    PdfDocument(file) to file
+                    Triple(PdfDocument(file), file, cached != null)
                 }
-            }.onSuccess { (doc, file) ->
+            }.onSuccess { (doc, file, openedFromCache) ->
                 document?.close()
                 document = doc
                 recents.record(objectKey, doc.pageCount)
                 sync.pushRecent(objectKey)
                 _bookmarks.value = readerPrefs.bookmarks(objectKey)
                 _readingMode.value = readerPrefs.readingMode(objectKey)
-                _state.value = PdfViewerState.Ready(doc, objectKey.substringAfterLast('/'))
-                loadOutlineFor(file, doc)
-                loadLinksFor(file, doc)
+                _state.value = PdfViewerState.Ready(
+                    document = doc,
+                    title = objectKey.substringAfterLast('/'),
+                    cacheId = file.name,
+                )
+                loadExtrasFor(file, doc)
+                if (openedFromCache) revalidateInBackground(objectKey)
             }.onFailure { e ->
                 _state.value = PdfViewerState.Error(e.userMessage())
             }
         }
     }
 
-    /** Parses the table-of-contents outline off the main path and folds it into the state. */
-    private fun loadOutlineFor(file: File, doc: PdfDocument) {
+    /**
+     * Parses outline + links in one PdfBox pass, slightly delayed so the first page renders win
+     * the CPU/IO race, then folds the result into the state.
+     */
+    private fun loadExtrasFor(file: File, doc: PdfDocument) {
         viewModelScope.launch {
-            val outline = loadOutline(file)
+            delay(EXTRAS_PARSE_DELAY_MS)
+            val extras = loadPdfExtras(file)
             val current = _state.value
             if (current is PdfViewerState.Ready && current.document === doc) {
-                _state.value = current.copy(outline = outline, outlineLoading = false)
+                _state.value = current.copy(
+                    outline = extras.outline,
+                    outlineLoading = false,
+                    links = extras.links,
+                )
             }
         }
     }
 
-    /** Extracts tappable link regions off the main path and folds them into the state. */
-    private fun loadLinksFor(file: File, doc: PdfDocument) {
-        viewModelScope.launch {
-            val links = loadPageLinks(file)
-            val current = _state.value
-            if (current is PdfViewerState.Ready && current.document === doc) {
-                _state.value = current.copy(links = links)
+    /**
+     * Stale-while-revalidate: when a cached copy was opened, quietly download any newer version
+     * so the *next* open shows it. The current session keeps the copy it opened with — swapping
+     * the document mid-read would yank the page out from under the user.
+     */
+    private fun revalidateInBackground(objectKey: String) {
+        val repository = session.repository ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val eTag = repository.objectETag(objectKey) ?: return@launch
+                val target = session.cacheFileFor(objectKey, eTag)
+                if (!target.exists() || target.length() == 0L) {
+                    downloadToCache(repository, objectKey, target)
+                }
             }
         }
     }
@@ -316,5 +341,8 @@ class PdfViewerViewModel @Inject constructor(
     private companion object {
         /** Soft cap on the on-device PDF cache; oldest files are evicted past this. */
         const val MAX_CACHE_BYTES = 512L * 1024 * 1024
+
+        /** Head start given to first-page rendering before the PdfBox outline/links parse. */
+        const val EXTRAS_PARSE_DELAY_MS = 350L
     }
 }
