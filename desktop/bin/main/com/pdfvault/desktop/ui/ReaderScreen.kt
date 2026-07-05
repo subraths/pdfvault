@@ -194,12 +194,19 @@ fun ReaderScreen(
         }.onSuccess { doc ->
             document = doc
             RecentsStore.record(docId, doc.pageCount)
+            com.pdfvault.desktop.sync.SyncManager.pushRecent(docId)
             scope.launch { outline = loadOutline(doc.file) }
             scope.launch { links = loadPageLinks(doc.file) }
         }.onFailure { loadError = it.message ?: "Couldn't open the PDF." }
     }
 
-    DisposableEffect(Unit) { onDispose { document?.close() } }
+    // Push the final reading position when leaving, so it syncs to other devices.
+    DisposableEffect(Unit) {
+        onDispose {
+            com.pdfvault.desktop.sync.SyncManager.pushRecent(docId)
+            document?.close()
+        }
+    }
 
     val pageCount = document?.pageCount ?: 0
     val currentPage = listState.firstVisibleItemIndex.coerceIn(0, (pageCount - 1).coerceAtLeast(0))

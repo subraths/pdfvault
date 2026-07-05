@@ -22,6 +22,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,6 +52,7 @@ import com.pdfvault.desktop.ui.ReaderScreen
 import com.pdfvault.desktop.ui.RecentsScreen
 import com.pdfvault.desktop.ui.SetupScreen
 import com.pdfvault.desktop.ui.openTargetFromKey
+import kotlinx.coroutines.launch
 import java.awt.datatransfer.DataFlavor
 import java.awt.dnd.DnDConstants
 import java.awt.dnd.DropTarget
@@ -107,12 +109,18 @@ private fun FrameWindowScope.App(initialLocal: File?, onQuit: () -> Unit, onTogg
     var themeMode by remember { mutableStateOf(UiPreferences.themeMode) }
     var showCloud by remember { mutableStateOf(false) }
     val controller = remember { ReaderController() }
+    val syncScope = rememberCoroutineScope()
 
     fun rebuildSession() { repository = credentials.load()?.let { S3Repository(it) } }
 
-    // On launch, if already signed in, pull accounts + recents; adopt a cloud account if we have none.
+    // On launch, if already signed in, pull accounts + recents; adopt a cloud account if we have
+    // none. Fresh install (no S3 config, not signed in): lead with sign-in / create-account so an
+    // existing user restores everything without touching S3 keys again.
     LaunchedEffect(Unit) {
-        if (AuthStore.isSignedIn && SyncManager.syncAll()) rebuildSession()
+        when {
+            AuthStore.isSignedIn -> { if (SyncManager.syncAll()) rebuildSession() }
+            repository == null && SyncManager.enabled -> showCloud = true
+        }
     }
 
     // Fullscreen is a window-level action, so wire it here rather than inside the reader.
@@ -170,7 +178,12 @@ private fun FrameWindowScope.App(initialLocal: File?, onQuit: () -> Unit, onTogg
 
                 repo == null -> SetupScreen(
                     credentials = credentials,
-                    onConfigured = { config -> repository = S3Repository(config) },
+                    onConfigured = { config ->
+                        repository = S3Repository(config)
+                        // First-time setup while signed in: store the account (secret encrypted)
+                        // in the cloud so signing in anywhere restores it without re-entering keys.
+                        syncScope.launch { runCatching { SyncManager.syncAll() } }
+                    },
                 )
 
                 else -> Row(Modifier.fillMaxSize()) {
@@ -190,9 +203,14 @@ private fun FrameWindowScope.App(initialLocal: File?, onQuit: () -> Unit, onTogg
                         NavigationRailItem(
                             selected = false,
                             onClick = {
+                                // Full sign-out: cloud session + local S3 config. The account (and
+                                // its S3 keys, encrypted) stays in the cloud — signing back in with
+                                // email + password restores everything.
+                                SyncManager.signOut()
                                 credentials.clear()
                                 repo.close()
                                 repository = null
+                                showCloud = true
                             },
                             icon = { Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "Sign out") },
                             label = { Text("Sign out") },
@@ -204,9 +222,11 @@ private fun FrameWindowScope.App(initialLocal: File?, onQuit: () -> Unit, onTogg
                             repository = repo,
                             onOpenPdf = { key -> opened = OpenTarget.Remote(key) },
                             onSignOut = {
+                                SyncManager.signOut()
                                 credentials.clear()
                                 repo.close()
                                 repository = null
+                                showCloud = true
                             },
                         )
                     }

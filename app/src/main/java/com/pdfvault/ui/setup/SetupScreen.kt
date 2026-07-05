@@ -30,6 +30,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -68,7 +69,13 @@ fun SetupScreen(
     }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text(stringResource(R.string.setup_title)) }) },
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(stringResource(if (state.authRequired) R.string.setup_account_title else R.string.setup_title))
+                },
+            )
+        },
     ) { inner ->
         Column(
             modifier = Modifier
@@ -78,8 +85,21 @@ fun SetupScreen(
                 .padding(horizontal = 20.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (state.authRequired) {
+                AccountSection(state = state, viewModel = viewModel)
+                state.error?.let { message ->
+                    Text(
+                        text = message,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                return@Column
+            }
+
             Text(
-                stringResource(R.string.setup_help),
+                stringResource(if (state.cloudSignedIn) R.string.setup_s3_once else R.string.setup_help),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -135,13 +155,74 @@ fun SetupScreen(
     }
 }
 
+/**
+ * Account-first onboarding step: sign in (restores the S3 account stored in the cloud and skips
+ * key entry) or create an account (falls through to the one-time key + bucket step).
+ */
 @Composable
-private fun SecretField(value: String, onValueChange: (String) -> Unit, enabled: Boolean) {
+private fun AccountSection(state: SetupUiState, viewModel: SetupViewModel) {
+    Text(
+        stringResource(R.string.setup_account_help),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+
+    OutlinedTextField(
+        value = state.email,
+        onValueChange = viewModel::onEmailChange,
+        label = { Text(stringResource(R.string.cloud_email)) },
+        singleLine = true,
+        enabled = !state.authBusy,
+        modifier = Modifier.fillMaxWidth(),
+    )
+
+    SecretField(
+        value = state.password,
+        onValueChange = viewModel::onPasswordChange,
+        enabled = !state.authBusy,
+        label = stringResource(R.string.cloud_password),
+    )
+
+    Button(
+        onClick = viewModel::signInCloud,
+        enabled = state.authValid && !state.authBusy,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        if (state.authBusy) {
+            CircularProgressIndicator(modifier = Modifier.height(18.dp), strokeWidth = 2.dp)
+            Text(stringResource(R.string.setup_working))
+        } else {
+            Text(stringResource(R.string.cloud_sign_in))
+        }
+    }
+    OutlinedButton(
+        onClick = viewModel::registerCloud,
+        enabled = state.authValid && !state.authBusy,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(stringResource(R.string.cloud_create_account))
+    }
+    TextButton(
+        onClick = viewModel::skipCloud,
+        enabled = !state.authBusy,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(stringResource(R.string.setup_skip_account))
+    }
+}
+
+@Composable
+private fun SecretField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    enabled: Boolean,
+    label: String = stringResource(R.string.setup_secret),
+) {
     var visible by remember { mutableStateOf(false) }
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
-        label = { Text(stringResource(R.string.setup_secret)) },
+        label = { Text(label) },
         singleLine = true,
         enabled = enabled,
         visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),

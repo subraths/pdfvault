@@ -25,6 +25,17 @@ object ReaderPreferences {
 
     fun setLastPage(objectKey: String, page: Int) {
         props.setProperty(pageKey(objectKey), page.toString())
+        props.setProperty(pageTsKey(objectKey), System.currentTimeMillis().toString())
+        save()
+    }
+
+    /** When the reading position for [objectKey] last changed (epoch millis), for sync ordering. */
+    fun lastPageUpdatedAt(objectKey: String): Long = props.getProperty(pageTsKey(objectKey))?.toLongOrNull() ?: 0L
+
+    /** Adopts a reading position from a backend sync, keeping the server's change time. */
+    fun setLastPageFromSync(objectKey: String, page: Int, updatedAt: Long) {
+        props.setProperty(pageKey(objectKey), page.toString())
+        props.setProperty(pageTsKey(objectKey), updatedAt.toString())
         save()
     }
 
@@ -62,6 +73,7 @@ object ReaderPreferences {
     }
 
     private fun pageKey(objectKey: String) = "page::$objectKey"
+    private fun pageTsKey(objectKey: String) = "pagets::$objectKey"
     private fun modeKey(objectKey: String) = "mode::$objectKey"
     private fun bookmarkKey(objectKey: String) = "bm::$objectKey"
 

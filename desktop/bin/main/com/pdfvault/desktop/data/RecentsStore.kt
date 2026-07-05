@@ -38,6 +38,10 @@ object RecentsStore {
     fun remove(objectKey: String) =
         persist(_recents.value.filterNot { it.objectKey == objectKey })
 
+    /** Replaces the whole list (used to adopt the merged result of a backend sync). */
+    fun replaceAll(items: List<RecentItem>) =
+        persist(items.sortedByDescending { it.openedAtMillis }.take(MAX_ENTRIES))
+
     /** Re-inserts a removed [item] at its original position (by open time), for undo. */
     fun restore(item: RecentItem) {
         val updated = (_recents.value.filterNot { it.objectKey == item.objectKey } + item)

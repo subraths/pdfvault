@@ -61,6 +61,9 @@ fun RecentsScreen(onOpenPdf: (String) -> Unit) {
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
+    // Pull the latest recents from the backend when the tab opens (no-op if signed out).
+    androidx.compose.runtime.LaunchedEffect(Unit) { com.pdfvault.desktop.sync.SyncManager.syncAll() }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {

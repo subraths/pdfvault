@@ -141,6 +141,13 @@ class SettingsViewModel @Inject constructor(
 
     fun setDynamicColor(enabled: Boolean) = themePrefs.setDynamicColor(enabled)
 
-    /** Wipes stored credentials and the active session. The caller navigates back to setup. */
-    fun signOut() = session.reset()
+    /**
+     * Full sign-out: cloud session + local S3 credentials. The account (and its S3 keys,
+     * encrypted) stays in the cloud — signing back in with email + password restores everything.
+     * The caller navigates back to setup, which now leads with the sign-in step.
+     */
+    fun signOut() {
+        sync.signOut()
+        session.reset()
+    }
 }
