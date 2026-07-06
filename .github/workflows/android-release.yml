@@ -64,7 +64,25 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: ./gradlew :app:assembleRelease --no-daemon --stacktrace -PBACKEND_BASE_URL="${{ vars.BACKEND_BASE_URL }}"
+          BACKEND_URL_OVERRIDE: ${{ vars.BACKEND_BASE_URL }}
+        # The repo variable only OVERRIDES the committed gradle.properties URL when it is set.
+        # (Passing -PBACKEND_BASE_URL="" unconditionally would clobber gradle.properties and
+        # silently ship a local-only APK with cloud sync hidden.)
+        run: |
+          ARGS=()
+          if [ -n "$BACKEND_URL_OVERRIDE" ]; then
+            ARGS+=("-PBACKEND_BASE_URL=$BACKEND_URL_OVERRIDE")
+          fi
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace "${ARGS[@]}"
+
+      - name: Verify the baked backend URL
+        run: |
+          URL=$(grep -o 'BACKEND_BASE_URL = "[^"]*"' app/build/generated/source/buildConfig/release/com/pdfvault/BuildConfig.java | cut -d'"' -f2)
+          echo "Baked BACKEND_BASE_URL: '${URL}'"
+          echo "**Baked backend URL:** \`${URL:-<empty — cloud sync disabled!>}\`" >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "$URL" ]; then
+            echo "::warning::BACKEND_BASE_URL is empty — this APK is local-only (no cloud sync/login)."
+          fi
 
       - name: Stage APK with a versioned name
         id: apk
