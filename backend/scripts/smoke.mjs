@@ -106,6 +106,21 @@ async function main() {
   const afterDel = await call(recents, event({ method: "GET", path: "/recents", token }));
   check("recent removed", (afterDel.json.recents || []).length === 1);
 
+  // Tombstone semantics: another device syncing its STALE copy must not resurrect the deleted doc...
+  const staleSync = await call(recents, event({
+    method: "POST", path: "/recents/sync", token,
+    body: { items: [
+      { docId: "docs/a.pdf", name: "a.pdf", openedAt: now + 1000, totalPages: 10, lastPage: 7, updatedAt: now + 1000 },
+    ] },
+  }));
+  const staleMerged = staleSync.json.recents || [];
+  check("stale sync can't resurrect a deleted recent", !staleMerged.some((r) => r.docId === "docs/a.pdf"), `count=${staleMerged.length}`);
+  // ...but genuinely RE-OPENING the doc (a strictly newer write) revives it everywhere.
+  const reopenAt = Date.now() + 60_000;
+  await call(recents, event({ method: "PUT", path: "/recents", token, body: { docId: "docs/a.pdf", name: "a.pdf", openedAt: reopenAt, totalPages: 10, lastPage: 8, updatedAt: reopenAt } }));
+  const afterReopen = await call(recents, event({ method: "GET", path: "/recents", token }));
+  check("re-opening revives a deleted recent", (afterReopen.json.recents || []).some((r) => r.docId === "docs/a.pdf"));
+
   console.log("\n" + results.join("\n"));
 }
 

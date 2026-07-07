@@ -50,9 +50,11 @@ import com.pdfvault.desktop.data.ReaderPreferences
 import com.pdfvault.desktop.data.RecentItem
 import com.pdfvault.desktop.data.RecentsStore
 import com.pdfvault.desktop.pdf.renderPdfThumbnail
+import com.pdfvault.desktop.sync.SyncManager
 import kotlinx.coroutines.launch
 import java.time.Duration
 import java.time.Instant
+import java.util.Calendar
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -62,7 +64,7 @@ fun RecentsScreen(onOpenPdf: (String) -> Unit) {
     val scope = rememberCoroutineScope()
 
     // Pull the latest recents from the backend when the tab opens (no-op if signed out).
-    androidx.compose.runtime.LaunchedEffect(Unit) { com.pdfvault.desktop.sync.SyncManager.syncAll() }
+    androidx.compose.runtime.LaunchedEffect(Unit) { SyncManager.syncAll() }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -71,7 +73,12 @@ fun RecentsScreen(onOpenPdf: (String) -> Unit) {
                 title = { Text("Recently opened") },
                 actions = {
                     if (items.isNotEmpty()) {
-                        IconButton(onClick = { RecentsStore.clear() }) {
+                        IconButton(onClick = {
+                            val keys = items.map { it.objectKey }
+                            RecentsStore.clear()
+                            // Tombstone them in the cloud so the clear applies on every device.
+                            keys.forEach { SyncManager.deleteRecentRemote(it) }
+                        }) {
                             Icon(Icons.Filled.DeleteSweep, contentDescription = "Clear history")
                         }
                     }
@@ -91,24 +98,34 @@ fun RecentsScreen(onOpenPdf: (String) -> Unit) {
                     )
                 }
             } else {
+                val groups = remember(items) { groupByDate(items) }
                 LazyColumn(Modifier.fillMaxSize()) {
-                    items(items, key = { it.objectKey }) { item ->
-                        RecentRow(
-                            item = item,
-                            onOpen = { onOpenPdf(item.objectKey) },
-                            onRemove = {
-                                RecentsStore.remove(item.objectKey)
-                                scope.launch {
-                                    val result = snackbarHostState.showSnackbar(
-                                        message = "Removed from recents",
-                                        actionLabel = "Undo",
-                                        duration = SnackbarDuration.Short,
-                                    )
-                                    if (result == SnackbarResult.ActionPerformed) RecentsStore.restore(item)
-                                }
-                            },
-                        )
-                        HorizontalDivider()
+                    groups.forEach { (label, groupItems) ->
+                        item(key = "header-$label") { GroupHeader(label) }
+                        items(groupItems, key = { it.objectKey }) { item ->
+                            RecentRow(
+                                item = item,
+                                onOpen = { onOpenPdf(item.objectKey) },
+                                onRemove = {
+                                    // Remove locally + tombstone in the cloud (removes on all devices).
+                                    RecentsStore.remove(item.objectKey)
+                                    SyncManager.deleteRecentRemote(item.objectKey)
+                                    scope.launch {
+                                        val result = snackbarHostState.showSnackbar(
+                                            message = "Removed from recents",
+                                            actionLabel = "Undo",
+                                            duration = SnackbarDuration.Short,
+                                        )
+                                        if (result == SnackbarResult.ActionPerformed) {
+                                            RecentsStore.restore(item)
+                                            // Revive the cloud copy (a fresh write outranks the tombstone).
+                                            SyncManager.pushRecent(item.objectKey)
+                                        }
+                                    }
+                                },
+                            )
+                            HorizontalDivider()
+                        }
                     }
                 }
             }
@@ -155,6 +172,36 @@ private fun RecentRow(item: RecentItem, onOpen: () -> Unit, onRemove: () -> Unit
             Icon(Icons.Filled.Delete, contentDescription = "Remove", tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
+}
+
+@Composable
+private fun GroupHeader(label: String) {
+    Text(
+        text = label,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
+    )
+}
+
+/** Buckets recents (already newest-first) into Today / Yesterday / Earlier this week / Earlier. */
+private fun groupByDate(items: List<RecentItem>): List<Pair<String, List<RecentItem>>> {
+    val startOfToday = Calendar.getInstance().apply {
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }.timeInMillis
+    val dayMs = 24L * 60 * 60 * 1000
+    val order = listOf("Today", "Yesterday", "Earlier this week", "Earlier")
+    return items.groupBy { item ->
+        when {
+            item.openedAtMillis >= startOfToday -> "Today"
+            item.openedAtMillis >= startOfToday - dayMs -> "Yesterday"
+            item.openedAtMillis >= startOfToday - 6 * dayMs -> "Earlier this week"
+            else -> "Earlier"
+        }
+    }.toList().sortedBy { order.indexOf(it.first) }
 }
 
 private fun formatRelative(millis: Long): String {

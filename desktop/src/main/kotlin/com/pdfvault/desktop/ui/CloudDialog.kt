@@ -56,8 +56,10 @@ fun CloudDialog(onDismiss: () -> Unit, onAccountImported: () -> Unit) {
                 onDismiss()
             } catch (e: BackendException) {
                 error = e.message
-            } catch (e: Exception) {
-                error = "Couldn't reach the server. Check your connection."
+            } catch (e: Throwable) {
+                // Throwable, not Exception: a NoClassDefFoundError from the packaged runtime must
+                // surface as a dialog message, not crash the window.
+                error = "Couldn't reach the server. Check your connection. (${e.javaClass.simpleName})"
             } finally {
                 busy = false
             }

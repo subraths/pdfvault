@@ -35,6 +35,12 @@ export interface RecentDoc {
   totalPages: number;
   lastPage: number;
   updatedAt: number;
+  /**
+   * Tombstone: deleting keeps the row (flagged, with a fresh updatedAt) instead of removing it,
+   * so another device's sync can't resurrect the doc from its stale local copy. Re-opening the
+   * doc (a strictly newer write) clears the flag.
+   */
+  deleted?: boolean;
 }
 
 /** Profile shape returned to clients — includes the decrypted secret for the authenticated owner. */

@@ -136,11 +136,15 @@ private fun FrameWindowScope.App(initialLocal: File?, appActions: AppActions, on
 
     // On launch, if already signed in, pull accounts + recents; adopt a cloud account if we have
     // none. Fresh install (no S3 config, not signed in): lead with sign-in / create-account so an
-    // existing user restores everything without touching S3 keys again.
+    // existing user restores everything without touching S3 keys again. runCatching(Throwable)
+    // because cloud sync must never crash the app — an uncaught throw here (e.g. a missing JDK
+    // module in the packaged runtime, or network stack failure) killed the whole window.
     LaunchedEffect(Unit) {
-        when {
-            AuthStore.isSignedIn -> { if (SyncManager.syncAll()) rebuildSession() }
-            repository == null && SyncManager.enabled -> showCloud = true
+        runCatching {
+            when {
+                AuthStore.isSignedIn -> { if (SyncManager.syncAll()) rebuildSession() }
+                repository == null && SyncManager.enabled -> showCloud = true
+            }
         }
     }
 

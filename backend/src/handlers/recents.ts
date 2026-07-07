@@ -11,7 +11,8 @@ function toView(r: RecentDoc): RecentView {
 }
 
 async function listView(col: Collection<RecentDoc>, userId: ObjectId) {
-  const docs = await col.find({ userId }).sort({ openedAt: -1 }).toArray();
+  // Tombstoned (deleted) docs stay in the collection to block resurrection, but never leave the API.
+  const docs = await col.find({ userId, deleted: { $ne: true } }).sort({ openedAt: -1 }).toArray();
   return docs.map(toView);
 }
 
@@ -32,7 +33,12 @@ async function upsert(event: APIGatewayProxyEventV2, userId: ObjectId) {
     updatedAt: optionalNumber(body.updatedAt, now),
   };
   const col = await recents();
-  await col.updateOne({ userId, docId }, { $set: fields, $setOnInsert: { userId, docId } }, { upsert: true });
+  // An explicit open/progress push always revives a tombstoned doc.
+  await col.updateOne(
+    { userId, docId },
+    { $set: { ...fields, deleted: false }, $setOnInsert: { userId, docId } },
+    { upsert: true },
+  );
   return ok({ recent: { docId, ...fields } });
 }
 
@@ -58,8 +64,13 @@ async function sync(event: APIGatewayProxyEventV2, userId: ObjectId) {
       lastPage: optionalInt(it.lastPage, 0),
       updatedAt: optionalNumber(it.updatedAt, now),
     };
-    // Overwrite only when the incoming copy is strictly newer...
-    await col.updateOne({ userId, docId, updatedAt: { $lt: incoming.updatedAt } }, { $set: incoming });
+    // Overwrite only when the incoming copy is strictly newer — this also revives a tombstone
+    // (the user re-opened the doc after deleting it elsewhere). A stale client copy loses to a
+    // newer tombstone, so a delete on one device cannot be resurrected by another's sync.
+    await col.updateOne(
+      { userId, docId, updatedAt: { $lt: incoming.updatedAt } },
+      { $set: { ...incoming, deleted: false } },
+    );
     // ...and insert it if the server has never seen this document.
     await col.updateOne({ userId, docId }, { $setOnInsert: { userId, docId, ...incoming } }, { upsert: true });
   }
@@ -70,7 +81,13 @@ async function sync(event: APIGatewayProxyEventV2, userId: ObjectId) {
 async function remove(event: APIGatewayProxyEventV2, userId: ObjectId) {
   const docId = event.queryStringParameters?.docId;
   if (!docId) throw new HttpError(400, "docId query parameter is required");
-  await (await recents()).deleteOne({ userId, docId });
+  // Tombstone instead of hard delete, stamped strictly newer than the doc's last update (client
+  // clocks can run ahead of ours) — so other devices' syncs drop the doc instead of re-uploading
+  // it. Only a genuinely newer write (re-opening the doc) revives it.
+  const col = await recents();
+  const existing = await col.findOne({ userId, docId }, { projection: { updatedAt: 1 } });
+  const ts = Math.max(Date.now(), (existing?.updatedAt ?? 0) + 1);
+  await col.updateOne({ userId, docId }, { $set: { deleted: true, updatedAt: ts } });
   return noContent();
 }
 

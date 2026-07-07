@@ -23,12 +23,23 @@ class RecentsViewModel @Inject constructor(
 
     val items: StateFlow<List<RecentItem>> = recents.recents
 
-    fun remove(objectKey: String) = recents.remove(objectKey)
+    /** Removes locally and tombstones in the cloud, so the item disappears on every device. */
+    fun remove(objectKey: String) {
+        recents.remove(objectKey)
+        sync.deleteRecentRemote(objectKey)
+    }
 
-    /** Restores a swiped-away [item] to the list (undo). */
-    fun restore(item: RecentItem) = recents.restore(item)
+    /** Restores a swiped-away [item] (undo) and revives it in the cloud. */
+    fun restore(item: RecentItem) {
+        recents.restore(item)
+        sync.pushRecent(item.objectKey)
+    }
 
-    fun clearAll() = recents.clear()
+    fun clearAll() {
+        val keys = recents.recents.value.map { it.objectKey }
+        recents.clear()
+        keys.forEach { sync.deleteRecentRemote(it) }
+    }
 
     /** Pulls the latest recents from the backend (no-op when signed out / not configured). */
     fun syncFromCloud() {

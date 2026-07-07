@@ -84,6 +84,15 @@ object SyncManager {
         scope.launch { runCatching { BackendApi.putRecent(toDto(item).copy(updatedAt = System.currentTimeMillis())) } }
     }
 
+    /**
+     * Fire-and-forget remote delete (tombstone) so removing a recent here removes it on every
+     * device — other clients drop it on their next sync instead of re-uploading it.
+     */
+    fun deleteRecentRemote(docId: String) {
+        if (!AuthStore.isSignedIn || !enabled) return
+        scope.launch { runCatching { BackendApi.deleteRecent(docId) } }
+    }
+
     private fun toDto(item: RecentItem): RecentDto = RecentDto(
         docId = item.objectKey,
         name = item.name,

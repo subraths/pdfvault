@@ -29,6 +29,10 @@ compose.desktop {
             targetFormats(TargetFormat.Deb, TargetFormat.AppImage)
             packageName = "PdfVault"
             packageVersion = "1.0.0"
+            // The packaged app ships a jlink-trimmed runtime; these aren't in Compose's default
+            // module set. java.net.http = BackendApi's HttpClient (missing it crashes on launch
+            // with NoClassDefFoundError); jdk.crypto.ec = TLS handshakes to AWS/API Gateway.
+            modules("java.net.http", "jdk.crypto.ec")
         }
     }
 }
