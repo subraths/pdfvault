@@ -124,6 +124,7 @@ import com.pdfvault.desktop.pdf.printPdf
 import com.pdfvault.desktop.pdf.searchPdfHighlights
 import com.pdfvault.desktop.s3.S3Repository
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -160,7 +161,9 @@ fun ReaderScreen(
     var loadError by remember { mutableStateOf<String?>(null) }
     var zoom by remember { mutableStateOf(1f) }
     var rotation by remember { mutableStateOf(0) }
-    var panel by remember { mutableStateOf(SidePanel.NONE) }
+    // Contents (TOC) sidebar starts open for every document; the toolbar toggle / Esc closes it.
+    // Keyed on docId so switching documents re-opens it.
+    var panel by remember(docId) { mutableStateOf(SidePanel.CONTENTS) }
     var readingMode by remember { mutableStateOf(ReaderPreferences.readingMode(docId)) }
     var bookmarks by remember { mutableStateOf(ReaderPreferences.bookmarks(docId)) }
     var outline by remember { mutableStateOf<List<TocEntry>>(emptyList()) }
@@ -226,7 +229,14 @@ fun ReaderScreen(
     }
 
     fun goToPage(index: Int) {
-        if (index in 0 until pageCount) scope.launch { listState.animateScrollToItem(index) }
+        if (index !in 0 until pageCount) return
+        scope.launch {
+            // Animate only short hops (next/prev page). Long jumps (TOC, search, bookmarks,
+            // go-to-page) land instantly — animating drags through every page in between,
+            // composing and rendering each one, which makes the jump feel sluggish.
+            val distance = kotlin.math.abs(index - listState.firstVisibleItemIndex)
+            if (distance <= 2) listState.animateScrollToItem(index) else listState.scrollToItem(index)
+        }
     }
 
     fun runSearch() {
@@ -559,10 +569,14 @@ private fun ContinuousReader(
             with(density) { contentWidth.toPx() }.toInt().coerceIn(1, MAX_RENDER_WIDTH_PX)
         }
 
-        // Prefetch a small forward-biased window so scrolling reveals ready pages, not spinners.
+        // Prefetch a small window biased toward the direction of travel so scrolling — in either
+        // direction — reveals ready pages, not spinners.
         LaunchedEffect(document, docId, renderWidthPx, rotation) {
+            var previousFirst = listState.firstVisibleItemIndex
             snapshotFlow { listState.firstVisibleItemIndex }.collectLatest { first ->
-                prefetchPages(document, docId, first, renderWidthPx, rotation, pageCount)
+                val scrollingUp = first < previousFirst
+                previousFirst = first
+                prefetchPages(document, docId, first, renderWidthPx, rotation, pageCount, scrollingUp)
             }
         }
 
@@ -610,9 +624,9 @@ private fun ContinuousPage(
     links: List<PdfLink>,
     onLink: (LinkTarget) -> Unit,
 ) {
-    val aspect by produceState(0.707f, document, index, rotation) {
-        value = runCatching { document.pageAspectRatio(index, rotation) }.getOrDefault(0.707f)
-    }
+    // Aspect ratios are precomputed at document load, so this is a lock-free array read — pages
+    // lay out at their final height immediately (no reflow jump when scrolling upward).
+    val aspect = remember(document, index, rotation) { document.pageAspectRatio(index, rotation) }
     val bitmap by produceState<ImageBitmap?>(null, document, docId, index, renderWidthPx, rotation) {
         loadPageProgressive(document, docId, index, renderWidthPx, rotation) { value = it }
     }
@@ -850,9 +864,7 @@ private fun ThumbnailsPanel(document: PdfDocument, docId: String, current: Int, 
 @Composable
 private fun ThumbCell(document: PdfDocument, docId: String, index: Int, selected: Boolean, onClick: () -> Unit) {
     val thumbPx = 150
-    val aspect by produceState(0.707f, document, index) {
-        value = runCatching { document.pageAspectRatio(index) }.getOrDefault(0.707f)
-    }
+    val aspect = remember(document, index) { document.pageAspectRatio(index) }
     val bitmap by produceState<ImageBitmap?>(null, document, index) {
         val key = PageRenderCache.key(docId, index, thumbPx)
         value = PageRenderCache.get(key) ?: withContext(Dispatchers.IO) {
@@ -1023,8 +1035,18 @@ private suspend fun prefetchPages(
     widthPx: Int,
     rotation: Int,
     pageCount: Int,
+    towardsTop: Boolean,
 ) = withContext(Dispatchers.IO) {
-    for (page in intArrayOf(center + 1, center + 2, center + 3, center - 1)) {
+    val order = if (towardsTop) {
+        intArrayOf(center - 1, center - 2, center - 3, center + 1)
+    } else {
+        intArrayOf(center + 1, center + 2, center + 3, center - 1)
+    }
+    for (page in order) {
+        // Rendering can't be interrupted mid-page, but stop between pages once a newer prefetch
+        // has superseded this one — otherwise stale renders pile up on the document lock and
+        // the visible page's render queues behind them.
+        ensureActive()
         if (page < 0 || page >= pageCount) continue
         val key = PageRenderCache.key(docId, page, widthPx, rotation)
         if (PageRenderCache.get(key) != null) continue

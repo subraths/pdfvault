@@ -68,9 +68,6 @@ class SetupViewModel @Inject constructor(
     fun onSelectBucket(name: String) = _state.update { it.copy(selectedBucket = name, error = null) }
     fun clearError() = _state.update { it.copy(error = null) }
 
-    /** Skip the account step and stay local-only (cloud sync can still be enabled from Settings). */
-    fun skipCloud() = _state.update { it.copy(authRequired = false, error = null) }
-
     /**
      * Signs in to an existing account. The sign-in runs a full sync, so if the account already
      * has an S3 profile stored (from first-time setup on any device) it's restored and setup is

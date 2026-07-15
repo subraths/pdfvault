@@ -30,7 +30,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -201,13 +200,6 @@ private fun AccountSection(state: SetupUiState, viewModel: SetupViewModel) {
         modifier = Modifier.fillMaxWidth(),
     ) {
         Text(stringResource(R.string.cloud_create_account))
-    }
-    TextButton(
-        onClick = viewModel::skipCloud,
-        enabled = !state.authBusy,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Text(stringResource(R.string.setup_skip_account))
     }
 }
 

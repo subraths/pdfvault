@@ -60,6 +60,21 @@ class PdfDocument(file: File) : Closeable {
     }
 
     /**
+     * Warms [aspectCache] for every page so layout can size pages without waiting on the render
+     * mutex — an uncached aspect query during scrolling queues behind in-flight renders, which
+     * makes pages compose at a guessed height and visibly reflow (worst when scrolling upward
+     * into pages that were never measured). Takes the mutex per page, so renders interleave
+     * freely; stops quietly once the document is closed or the caller is cancelled.
+     */
+    suspend fun preloadAspectRatios() {
+        for (index in 0 until pageCount) {
+            if (closed) return
+            if (aspectCache.containsKey(index)) continue
+            if (runCatching { pageAspectRatio(index) }.isFailure) return
+        }
+    }
+
+    /**
      * Renders [index] to a bitmap scaled to [targetWidthPx], preserving aspect ratio. The result
      * may be smaller than requested: dimensions are capped (long side and total pixels) so a very
      * tall page can't demand a 100MB+ allocation or exceed GPU texture limits, and an

@@ -17,18 +17,22 @@ class PdfDocument(val file: File) : Closeable {
     private val document: PDDocument = PDDocument.load(file)
     private val renderer = PDFRenderer(document)
 
+    // Precomputed at load (cropBox reads only, no rendering) so layout can query page sizes
+    // without taking the render lock — a UI-thread caller must never wait on an in-flight render.
+    private val aspectRatios: FloatArray = FloatArray(document.numberOfPages) { i ->
+        val box = document.getPage(i).cropBox
+        if (box.height > 0f) box.width / box.height else 0.707f
+    }
+
     val pageCount: Int get() = document.numberOfPages
 
     /** Displayed width/height ratio of page [index], accounting for a user [rotation] (0/90/180/270). */
-    @Synchronized
     fun pageAspectRatio(index: Int, rotation: Int = 0): Float {
-        val box = document.getPage(index).cropBox
-        val w = box.width
-        val h = box.height
+        val aspect = aspectRatios.getOrElse(index) { 0.707f }
         return if (rotation == 90 || rotation == 270) {
-            if (w > 0f) h / w else 1.414f
+            if (aspect > 0f) 1f / aspect else 1.414f
         } else {
-            if (h > 0f) w / h else 0.707f
+            aspect
         }
     }
 

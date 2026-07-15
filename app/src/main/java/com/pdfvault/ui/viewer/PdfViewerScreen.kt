@@ -845,15 +845,19 @@ private fun ContinuousVerticalPdf(
             if (settledScale >= 1.75f) (renderWidthPx * 2).coerceAtMost(HI_RES_MAX_WIDTH_PX) else renderWidthPx
         }
 
-        // Render a small forward-biased window of pages into the cache ahead of the viewport,
-        // so scrolling reveals already-rendered pages instead of spinners. Debounced so prefetch
-        // only runs when scrolling pauses — it shares one render mutex with the visible pages and
-        // must never queue ahead of them. collectLatest cancels stale work between pages.
+        // Render a small window of pages into the cache around the viewport, biased toward the
+        // direction of travel, so scrolling — in either direction — reveals already-rendered
+        // pages instead of spinners. Debounced so prefetch only runs when scrolling pauses — it
+        // shares one render mutex with the visible pages and must never queue ahead of them.
+        // collectLatest cancels stale work between pages.
         LaunchedEffect(document, docId, renderWidthPx) {
+            var previousFirst = listState.firstVisibleItemIndex
             snapshotFlow { listState.firstVisibleItemIndex }
                 .debounce(150)
                 .collectLatest { first ->
-                    prefetchPages(document, docId, first, renderWidthPx, pageCount)
+                    val scrollingUp = first < previousFirst
+                    previousFirst = first
+                    prefetchPages(document, docId, first, renderWidthPx, pageCount, scrollingUp)
                 }
         }
 
@@ -1000,9 +1004,11 @@ private suspend fun loadPageProgressive(
 }
 
 /**
- * Renders a small forward-biased window of pages around [center] into [PageRenderCache] so they
- * are ready before the user scrolls to them. Skips pages already cached; renders sequentially and
- * is cancellation-friendly, so a fast scroll abandons stale work.
+ * Renders a small window of pages around [center] into [PageRenderCache] so they are ready
+ * before the user scrolls to them, prioritising the direction of travel ([towardsTop] when the
+ * user is scrolling upward). Skips pages already cached; renders sequentially and is
+ * cancellation-friendly (renderPage suspends on the mutex between pages), so a fast scroll
+ * abandons stale work.
  */
 private suspend fun prefetchPages(
     document: PdfDocument,
@@ -1010,8 +1016,14 @@ private suspend fun prefetchPages(
     center: Int,
     widthPx: Int,
     pageCount: Int,
+    towardsTop: Boolean,
 ) = withContext(Dispatchers.IO) {
-    for (page in intArrayOf(center + 1, center + 2, center + 3, center - 1)) {
+    val order = if (towardsTop) {
+        intArrayOf(center - 1, center - 2, center - 3, center + 1)
+    } else {
+        intArrayOf(center + 1, center + 2, center + 3, center - 1)
+    }
+    for (page in order) {
         if (page < 0 || page >= pageCount) continue
         val key = PageRenderCache.key(docId, page, widthPx)
         if (PageRenderCache.get(key) != null) continue

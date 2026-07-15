@@ -268,6 +268,7 @@ class PdfViewerViewModel @Inject constructor(
                     cacheId = file.name,
                 )
                 loadExtrasFor(file, doc)
+                preloadAspectsFor(doc)
                 if (openedFromCache) revalidateInBackground(objectKey)
             }.onFailure { e ->
                 _state.value = PdfViewerState.Error(e.userMessage())
@@ -291,6 +292,18 @@ class PdfViewerViewModel @Inject constructor(
                     links = extras.links,
                 )
             }
+        }
+    }
+
+    /**
+     * Warms every page's aspect ratio in the background (delayed so first-page renders win the
+     * mutex first), so pages lay out at their real height immediately instead of reflowing —
+     * the reflow is what made scrolling back upward feel janky.
+     */
+    private fun preloadAspectsFor(doc: PdfDocument) {
+        viewModelScope.launch {
+            delay(EXTRAS_PARSE_DELAY_MS)
+            doc.preloadAspectRatios()
         }
     }
 

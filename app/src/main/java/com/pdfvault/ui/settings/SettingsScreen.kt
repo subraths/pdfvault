@@ -309,7 +309,12 @@ fun SettingsScreen(
                     onSignIn = viewModel::signIn,
                     onRegister = viewModel::register,
                     onSyncNow = viewModel::syncNow,
-                    onSignOut = viewModel::cloudSignOut,
+                    // Sign-in is mandatory, so leaving the account is a full sign-out: cloud
+                    // session + local S3 config, then back to the sign-in screen.
+                    onSignOut = {
+                        viewModel.signOut()
+                        onSignedOut()
+                    },
                 )
             }
 

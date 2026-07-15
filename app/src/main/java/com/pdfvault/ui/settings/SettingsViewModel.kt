@@ -60,7 +60,6 @@ class SettingsViewModel @Inject constructor(
 
     fun syncNow() = cloudCall { sync.syncAll() }
 
-    fun cloudSignOut() = sync.signOut()
 
     private fun cloudCall(block: suspend () -> Unit) {
         if (_cloudBusy.value) return

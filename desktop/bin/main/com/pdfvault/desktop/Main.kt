@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,6 +55,7 @@ import com.pdfvault.desktop.ui.ReaderScreen
 import com.pdfvault.desktop.ui.RecentsScreen
 import com.pdfvault.desktop.ui.SettingsScreen
 import com.pdfvault.desktop.ui.SetupScreen
+import com.pdfvault.desktop.ui.SignInScreen
 import com.pdfvault.desktop.ui.openTargetFromKey
 import kotlinx.coroutines.launch
 import java.awt.datatransfer.DataFlavor
@@ -135,16 +137,12 @@ private fun FrameWindowScope.App(initialLocal: File?, appActions: AppActions, on
     fun rebuildSession() { repository = credentials.load()?.let { S3Repository(it) } }
 
     // On launch, if already signed in, pull accounts + recents; adopt a cloud account if we have
-    // none. Fresh install (no S3 config, not signed in): lead with sign-in / create-account so an
-    // existing user restores everything without touching S3 keys again. runCatching(Throwable)
+    // none. (Signed-out users are stopped by the SignInScreen gate below.) runCatching(Throwable)
     // because cloud sync must never crash the app — an uncaught throw here (e.g. a missing JDK
     // module in the packaged runtime, or network stack failure) killed the whole window.
     LaunchedEffect(Unit) {
         runCatching {
-            when {
-                AuthStore.isSignedIn -> { if (SyncManager.syncAll()) rebuildSession() }
-                repository == null && SyncManager.enabled -> showCloud = true
-            }
+            if (AuthStore.isSignedIn && SyncManager.syncAll()) rebuildSession()
         }
     }
 
@@ -186,7 +184,13 @@ private fun FrameWindowScope.App(initialLocal: File?, appActions: AppActions, on
     MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             val repo = repository
+            val auth by SyncManager.authState.collectAsState()
             when {
+                // Signing in (or creating an account) is mandatory — nothing renders before it.
+                SyncManager.enabled && !auth.signedIn -> SignInScreen(
+                    onSignedIn = { imported -> if (imported) rebuildSession() },
+                )
+
                 // The reader takes over the whole window; works for local files even before S3 setup.
                 opened != null -> ReaderScreen(
                     repository = repo,
@@ -236,7 +240,6 @@ private fun FrameWindowScope.App(initialLocal: File?, appActions: AppActions, on
                                 credentials.clear()
                                 repo.close()
                                 repository = null
-                                showCloud = true
                             },
                         )
                         Tab.SETTINGS -> SettingsScreen(
@@ -247,13 +250,12 @@ private fun FrameWindowScope.App(initialLocal: File?, appActions: AppActions, on
                             onCloud = { showCloud = true },
                             onSignOut = {
                                 // Full sign-out: cloud session + local S3 config. The account (and
-                                // its S3 keys, encrypted) stays in the cloud — signing back in with
-                                // email + password restores everything.
+                                // its S3 keys, encrypted) stays in the cloud — the mandatory
+                                // sign-in gate reappears, and signing back in restores everything.
                                 SyncManager.signOut()
                                 credentials.clear()
                                 repo.close()
                                 repository = null
-                                showCloud = true
                             },
                         )
                     }
